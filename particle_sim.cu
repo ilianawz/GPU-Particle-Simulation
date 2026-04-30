@@ -57,117 +57,121 @@ __global__ void update_particles_gpu(float *x, float *y,
         y[i] += vy[i] * dt;
 
         // boundary collisions
-        if (x[i] < 0 || x[i] > WIDTH)
-            vx[i] *= -1;
-
-        if (y[i] < 0 || y[i] > HEIGHT)
-            vy[i] *= -1;
+//        if (x[i] < 0 || x[i] > WIDTH)
+//            vx[i] *= -1;
+//
+//        if (y[i] < 0 || y[i] > HEIGHT)
+//            vy[i] *= -1;
+        vx[i] *= (x[i] < 0 || x[i] > WIDTH) ? -1.0f : 1.0f;
+        vy[i] *= (y[i] < 0 || y[i] > HEIGHT) ? -1.0f : 1.0f;
     }
 }
 
 // ---------------- MAIN ----------------
 int main() {
 
-    int numElements = 1 << 16;  // 65536 particles
+//    int numElements = 1 << 16;  // 65536 particles
+	int sizes[] = {1<<12, 1<<14, 1<<16, 1<<18};
     float dt = 0.01f;
 
-    // Host memory
-    float *hostX = (float *)malloc(numElements * sizeof(float));
-    float *hostY = (float *)malloc(numElements * sizeof(float));
-    float *hostVX = (float *)malloc(numElements * sizeof(float));
-    float *hostVY = (float *)malloc(numElements * sizeof(float));
+    for (int s = 0; s < 4; s++) {
 
-    // Initialize particles
-    for (int i = 0; i < numElements; i++) {
-        hostX[i] = rand() % 100;
-        hostY[i] = rand() % 100;
-        hostVX[i] = rand() % 10 - 5;
-        hostVY[i] = rand() % 10 - 5;
-    }
+    	int numElements = sizes[s];
+    	std::cout << "\nTesting N = " << numElements << std::endl;
 
-    // ---------------- CPU RUN ----------------
-    float *cpuX = (float *)malloc(numElements * sizeof(float));
-    float *cpuY = (float *)malloc(numElements * sizeof(float));
-    float *cpuVX = (float *)malloc(numElements * sizeof(float));
-    float *cpuVY = (float *)malloc(numElements * sizeof(float));
+		// Host memory
+		float *hostX = (float *)malloc(numElements * sizeof(float));
+		float *hostY = (float *)malloc(numElements * sizeof(float));
+		float *hostVX = (float *)malloc(numElements * sizeof(float));
+		float *hostVY = (float *)malloc(numElements * sizeof(float));
 
-    memcpy(cpuX, hostX, numElements * sizeof(float));
-    memcpy(cpuY, hostY, numElements * sizeof(float));
-    memcpy(cpuVX, hostVX, numElements * sizeof(float));
-    memcpy(cpuVY, hostVY, numElements * sizeof(float));
+		// Initialize particles
+		for (int i = 0; i < numElements; i++) {
+			hostX[i] = rand() % 100;
+			hostY[i] = rand() % 100;
+			hostVX[i] = rand() % 10 - 5;
+			hostVY[i] = rand() % 10 - 5;
+		}
 
-    auto startCPU = std::chrono::high_resolution_clock::now();
+		// ---------------- CPU RUN ----------------
+		float *cpuX = (float *)malloc(numElements * sizeof(float));
+		float *cpuY = (float *)malloc(numElements * sizeof(float));
+		float *cpuVX = (float *)malloc(numElements * sizeof(float));
+		float *cpuVY = (float *)malloc(numElements * sizeof(float));
 
-    for (int t = 0; t < 100; t++) {
-        update_particles_cpu(cpuX, cpuY, cpuVX, cpuVY, numElements, dt);
-    }
+		memcpy(cpuX, hostX, numElements * sizeof(float));
+		memcpy(cpuY, hostY, numElements * sizeof(float));
+		memcpy(cpuVX, hostVX, numElements * sizeof(float));
+		memcpy(cpuVY, hostVY, numElements * sizeof(float));
 
-    auto endCPU = std::chrono::high_resolution_clock::now();
-    double cpuTime = std::chrono::duration<double, std::milli>(endCPU - startCPU).count();
+		auto startCPU = std::chrono::high_resolution_clock::now();
 
-    std::cout << "CPU Time: " << cpuTime << " ms" << std::endl;
+		for (int t = 0; t < 100; t++) {
+			update_particles_cpu(cpuX, cpuY, cpuVX, cpuVY, numElements, dt);
+		}
 
-    // ---------------- GPU SETUP ----------------
-    float *deviceX, *deviceY, *deviceVX, *deviceVY;
+		auto endCPU = std::chrono::high_resolution_clock::now();
+		double cpuTime = std::chrono::duration<double, std::milli>(endCPU - startCPU).count();
 
-    CHECK(cudaMalloc((void **)&deviceX, numElements * sizeof(float)));
-    CHECK(cudaMalloc((void **)&deviceY, numElements * sizeof(float)));
-    CHECK(cudaMalloc((void **)&deviceVX, numElements * sizeof(float)));
-    CHECK(cudaMalloc((void **)&deviceVY, numElements * sizeof(float)));
+		std::cout << "CPU Time: " << cpuTime << " ms" << std::endl;
 
-    CHECK(cudaMemcpy(deviceX, hostX, numElements * sizeof(float), cudaMemcpyHostToDevice));
-    CHECK(cudaMemcpy(deviceY, hostY, numElements * sizeof(float), cudaMemcpyHostToDevice));
-    CHECK(cudaMemcpy(deviceVX, hostVX, numElements * sizeof(float), cudaMemcpyHostToDevice));
-    CHECK(cudaMemcpy(deviceVY, hostVY, numElements * sizeof(float), cudaMemcpyHostToDevice));
+		// ---------------- GPU SETUP ----------------
+		float *deviceX, *deviceY, *deviceVX, *deviceVY;
 
-    int numBlocks = (numElements + BLOCK_SIZE - 1) / BLOCK_SIZE;
-    dim3 dimGrid(numBlocks, 1, 1);
-    dim3 dimBlock(BLOCK_SIZE, 1, 1);
+		CHECK(cudaMalloc((void **)&deviceX, numElements * sizeof(float)));
+		CHECK(cudaMalloc((void **)&deviceY, numElements * sizeof(float)));
+		CHECK(cudaMalloc((void **)&deviceVX, numElements * sizeof(float)));
+		CHECK(cudaMalloc((void **)&deviceVY, numElements * sizeof(float)));
 
-    // ---------------- GPU RUN ----------------
-    cudaEvent_t start, stop;
-    cudaEventCreate(&start);
-    cudaEventCreate(&stop);
+		CHECK(cudaMemcpy(deviceX, hostX, numElements * sizeof(float), cudaMemcpyHostToDevice));
+		CHECK(cudaMemcpy(deviceY, hostY, numElements * sizeof(float), cudaMemcpyHostToDevice));
+		CHECK(cudaMemcpy(deviceVX, hostVX, numElements * sizeof(float), cudaMemcpyHostToDevice));
+		CHECK(cudaMemcpy(deviceVY, hostVY, numElements * sizeof(float), cudaMemcpyHostToDevice));
 
-    cudaEventRecord(start);
+		int numBlocks = (numElements + BLOCK_SIZE - 1) / BLOCK_SIZE;
+		dim3 dimGrid(numBlocks, 1, 1);
+		dim3 dimBlock(BLOCK_SIZE, 1, 1);
 
-    for (int t = 0; t < 100; t++) {
-        update_particles_gpu<<<dimGrid, dimBlock>>>(
-            deviceX, deviceY, deviceVX, deviceVY, numElements, dt);
-    }
+		// ---------------- GPU RUN ----------------
+		auto startGPU = std::chrono::high_resolution_clock::now();
 
-    cudaEventRecord(stop);
-    cudaEventSynchronize(stop);
+		for (int t = 0; t < 100; t++) {
+		    update_particles_gpu<<<dimGrid, dimBlock>>>(
+		        deviceX, deviceY, deviceVX, deviceVY, numElements, dt);
+		    CHECK(cudaDeviceSynchronize());  // ensure completion
+		}
 
-    float gpuTime;
-    cudaEventElapsedTime(&gpuTime, start, stop);
+		auto endGPU = std::chrono::high_resolution_clock::now();
 
-    std::cout << "GPU Time: " << gpuTime << " ms" << std::endl;
+		double gpuTime = std::chrono::duration<double, std::milli>(endGPU - startGPU).count();
 
-    CHECK(cudaDeviceSynchronize());
+		std::cout << "GPU Time: " << gpuTime << " ms" << std::endl;
 
-    // Copy back results
-    CHECK(cudaMemcpy(hostX, deviceX, numElements * sizeof(float), cudaMemcpyDeviceToHost));
-    CHECK(cudaMemcpy(hostY, deviceY, numElements * sizeof(float), cudaMemcpyDeviceToHost));
+		CHECK(cudaDeviceSynchronize());
 
-    std::cout << "First particle position: "
-              << hostX[0] << ", " << hostY[0] << std::endl;
+		// Copy back results
+		CHECK(cudaMemcpy(hostX, deviceX, numElements * sizeof(float), cudaMemcpyDeviceToHost));
+		CHECK(cudaMemcpy(hostY, deviceY, numElements * sizeof(float), cudaMemcpyDeviceToHost));
 
-    // Cleanup
-    cudaFree(deviceX);
-    cudaFree(deviceY);
-    cudaFree(deviceVX);
-    cudaFree(deviceVY);
+		std::cout << "First particle position: "
+				  << hostX[0] << ", " << hostY[0] << std::endl;
 
-    free(hostX);
-    free(hostY);
-    free(hostVX);
-    free(hostVY);
+		// Cleanup
+		cudaFree(deviceX);
+		cudaFree(deviceY);
+		cudaFree(deviceVX);
+		cudaFree(deviceVY);
 
-    free(cpuX);
-    free(cpuY);
-    free(cpuVX);
-    free(cpuVY);
+		free(hostX);
+		free(hostY);
+		free(hostVX);
+		free(hostVY);
+
+		free(cpuX);
+		free(cpuY);
+		free(cpuVX);
+		free(cpuVY);
+	}
 
     return 0;
 }
